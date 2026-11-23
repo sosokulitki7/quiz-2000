@@ -2,7 +2,9 @@ let allQuestions = [];
 let currentRoundQuestions = [];
 let currentIndex = 0;
 let score = 0;
+let currentCorrectText = ""; // Запоминаем текст правильного ответа
 const QUESTIONS_PER_ROUND = 10; // Количество вопросов за один раунд
+const STORAGE_KEY = 'quiz2000_used_indices';
 
 // Загружаем базу вопросов при открытии страницы
 async function loadQuestions() {
@@ -17,7 +19,7 @@ async function loadQuestions() {
     } catch (error) {
         console.error(error);
         document.getElementById('progress').innerText = "Ошибка подключения";
-        document.getElementById('question').innerText = "Не удалось загрузить questions.json. Запустите сайт через локальный сервер (например, Live Server в VS Code), а не двойным кликом по файлу.";
+        document.getElementById('question').innerText = "Не удалось загрузить questions.json.";
     }
 }
 
@@ -31,59 +33,89 @@ function shuffle(array) {
     return copy;
 }
 
-// Запуск нового раунда
+function getUsedIndices() {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved ? JSON.parse(saved) : [];
+}
+
+function saveUsedIndices(indices) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(indices));
+}
+
+// Запуск нового раунда без повторений вопросов
 function startNewRound() {
     currentIndex = 0;
     score = 0;
+
+    let usedIndices = getUsedIndices();
     
-    // Перемешиваем всю базу и берем первые N вопросов
-    currentRoundQuestions = shuffle(allQuestions).slice(0, QUESTIONS_PER_ROUND);
-    
+    let availableIndices = allQuestions
+        .map((_, index) => index)
+        .filter(index => !usedIndices.includes(index));
+
+    if (availableIndices.length === 0) {
+        usedIndices = [];
+        availableIndices = allQuestions.map((_, index) => index);
+    }
+
+    const selectedIndices = shuffle(availableIndices).slice(0, QUESTIONS_PER_ROUND);
+    saveUsedIndices([...usedIndices, ...selectedIndices]);
+
+    currentRoundQuestions = selectedIndices.map(index => allQuestions[index]);
+
     document.getElementById('quiz-box').classList.remove('hidden');
     document.getElementById('result-box').classList.add('hidden');
     renderQuestion();
 }
 
-// Отрисовка текущего вопроса и кнопок ответов
+// Отрисовка вопроса со случайным порядком вариантов ответа
 function renderQuestion() {
     const qData = currentRoundQuestions[currentIndex];
-    document.getElementById('progress').innerText = `Вопрос ${currentIndex + 1} из ${currentRoundQuestions.length}`;
+    const usedCount = getUsedIndices().length;
+    
+    document.getElementById('progress').innerText = 
+        `Вопрос ${currentIndex + 1} из ${currentRoundQuestions.length} (Пройдено по базе: ${usedCount}/${allQuestions.length})`;
+    
     document.getElementById('question').innerText = qData.q;
+    
+    // Сохраняем текст правильного ответа ДО перемешивания
+    currentCorrectText = qData.options[qData.answer];
+    
+    // Перемешиваем варианты ответов случайным образом
+    const shuffledOptions = shuffle(qData.options);
     
     const optionsDiv = document.getElementById('options');
     optionsDiv.innerHTML = '';
 
-    qData.options.forEach((opt, idx) => {
+    shuffledOptions.forEach((optText) => {
         const btn = document.createElement('button');
         btn.className = 'btn';
-        btn.innerText = opt;
-        btn.onclick = () => handleAnswer(idx);
+        btn.innerText = optText;
+        btn.onclick = () => handleAnswer(optText, btn);
         optionsDiv.appendChild(btn);
     });
 }
 
-// Проверка ответа и переход к следующему вопросу
-function handleAnswer(selectedIdx) {
-    const correctIdx = currentRoundQuestions[currentIndex].answer;
+// Проверка ответа по тексту кнопки
+function handleAnswer(selectedText, clickedBtn) {
     const buttons = document.querySelectorAll('#options .btn');
     
-    buttons.forEach((btn, idx) => {
+    buttons.forEach((btn) => {
         btn.disabled = true;
-        if (idx === correctIdx) {
-            btn.style.background = '#166534'; // Спокойный темно-зеленый
+        if (btn.innerText === currentCorrectText) {
+            btn.style.background = '#166534'; // Зеленый для правильного
             btn.style.borderColor = '#22c55e';
         }
-        if (idx === selectedIdx && idx !== correctIdx) {
-            btn.style.background = '#991b1b'; // Спокойный темно-красный
+        if (btn === clickedBtn && selectedText !== currentCorrectText) {
+            btn.style.background = '#991b1b'; // Красный для ошибки
             btn.style.borderColor = '#ef4444';
         }
     });
 
-    if (selectedIdx === correctIdx) {
+    if (selectedText === currentCorrectText) {
         score++;
     }
 
-    // Пауза 800 мс, чтобы игрок увидел правильный вариант
     setTimeout(() => {
         currentIndex++;
         if (currentIndex < currentRoundQuestions.length) {
@@ -94,12 +126,18 @@ function handleAnswer(selectedIdx) {
     }, 800);
 }
 
-// Показ финального экрана с результатами
+// Финальный экран раунда
 function showResults() {
     document.getElementById('quiz-box').classList.add('hidden');
     document.getElementById('result-box').classList.remove('hidden');
-    document.getElementById('score-text').innerText = `Ваш результат: ${score} из ${currentRoundQuestions.length}!`;
+    
+    const remaining = allQuestions.length - getUsedIndices().length;
+    const extraText = remaining === 0 
+        ? " Вы прошли все вопросы в базе! Следующая игра начнет новый круг." 
+        : ` Осталось новых вопросов в базе: ${remaining}.`;
+
+    document.getElementById('score-text').innerText = 
+        `Ваш результат: ${score} из ${currentRoundQuestions.length}!${extraText}`;
 }
 
-// Старт при загрузке скрипта
 loadQuestions();
